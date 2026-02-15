@@ -1,4 +1,5 @@
 import csv
+from random import randint
 from datetime import datetime
 from domain.accelerometer import Accelerometer
 from domain.gps import Gps
@@ -35,7 +36,7 @@ class FileDatasource:
         self.gps_reader = csv.DictReader(self.gps_file)
         self._verify_headers(self.gps_reader, self._required_gps, self.gps_filename)
 
-    def read(self) -> AggregatedData:
+    def _read_single(self):
         try:
             acc_row = next(self.acc_reader)
             gps_row = next(self.gps_reader)
@@ -56,6 +57,9 @@ class FileDatasource:
             datetime.now(),
             self.user_id
         )
+
+    def read(self) -> AggregatedData:
+        return [self._read_single() for _ in range(randint(5, 7))]
 
     def stopReading(self):
         if self.acc_file: self.acc_file.close()

@@ -29,7 +29,7 @@ def publish(client, topic, datasource, delay):
     while True:
         time.sleep(delay)
         data = datasource.read()
-        msg = AggregatedDataSchema().dumps(data)
+        msg = AggregatedDataSchema(many=True).dumps(data)
         result = client.publish(topic, msg)
         # result: [0, 1]
         status = result[0]
