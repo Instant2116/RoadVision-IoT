@@ -1,0 +1,11 @@
+{
+    "default_start_position": {
+        "latitude": 48.4647,
+        "longitude": 35.0461
+    },
+    "data_file": "data.csv",
+    "gravity_base": 16500,
+    "scale_factor": 16384.0,
+    "pothole_threshold_pct": 0.4,
+    "bump_threshold_pct": 1.4
+}
