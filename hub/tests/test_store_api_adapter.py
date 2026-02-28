@@ -30,11 +30,13 @@ class TestStoreApiAdapter(unittest.TestCase):
         # Mock the response from the Store API
         mock_response = Mock(status_code=201)  # 201 indicates successful creation
         mock_post.return_value = mock_response
-        # Call the save_data method
-        result = self.store_api_adapter.save_data(processed_data)
+        # Call the save_data method with a list (batch)
+        result = self.store_api_adapter.save_data([processed_data])
         # Ensure that the post method of the mock is called with the correct arguments
         mock_post.assert_called_once_with(
-            "http://test-api.com/agent_data", json=processed_data.model_dump()
+            "http://test-api.com/processed_agent_data/",
+            json=[processed_data.model_dump(mode="json")],
+            timeout=10,
         )
         # Ensure that the result is True, indicating successful saving
         self.assertTrue(result)
@@ -59,11 +61,13 @@ class TestStoreApiAdapter(unittest.TestCase):
         # Mock the response from the Store API
         mock_response = Mock(status_code=400)  # 400 indicates a client error
         mock_post.return_value = mock_response
-        # Call the save_data method
-        result = self.store_api_adapter.save_data(processed_data)
+        # Call the save_data method with a list (batch)
+        result = self.store_api_adapter.save_data([processed_data])
         # Ensure that the post method of the mock is called with the correct arguments
         mock_post.assert_called_once_with(
-            "http://test-api.com/agent_data", json=processed_data.model_dump()
+            "http://test-api.com/processed_agent_data/",
+            json=[processed_data.model_dump(mode="json")],
+            timeout=10,
         )
         # Ensure that the result is False, indicating failure to save
         self.assertFalse(result)

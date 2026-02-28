@@ -13,7 +13,7 @@ from sqlalchemy import (
     DateTime,
 )
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql import select
+from sqlalchemy.sql import select, insert
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from config import (
@@ -115,10 +115,10 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
 
 
 # Function to send data to subscribed users
-async def send_data_to_subscribers(user_id: int, data):
+async def send_data_to_subscribers(user_id: int, data: Any):
     if user_id in subscriptions:
         for websocket in subscriptions[user_id]:
-            await websocket.send_json(json.dumps(data))
+            await websocket.send_json(data)
 
 
 # FastAPI CRUDL endpoints
@@ -126,9 +126,48 @@ async def send_data_to_subscribers(user_id: int, data):
 
 @app.post("/processed_agent_data/")
 async def create_processed_agent_data(data: List[ProcessedAgentData]):
-    # Insert data to database
-    # Send data to subscribers
-    pass
+    if not data:
+        return {"status": "ok", "inserted": 0}
+    metadata.create_all(engine)
+    inserted: List[ProcessedAgentDataInDB] = []
+    with engine.connect() as conn:
+        for item in data:
+            stmt = (
+                insert(processed_agent_data)
+                .values(
+                    road_state=item.road_state,
+                    user_id=item.agent_data.user_id,
+                    x=item.agent_data.accelerometer.x,
+                    y=item.agent_data.accelerometer.y,
+                    z=item.agent_data.accelerometer.z,
+                    latitude=item.agent_data.gps.latitude,
+                    longitude=item.agent_data.gps.longitude,
+                    timestamp=item.agent_data.timestamp,
+                )
+                .returning(processed_agent_data.c.id)
+            )
+            result = conn.execute(stmt)
+            row_id = result.scalar()
+            inserted.append(
+                ProcessedAgentDataInDB(
+                    id=row_id,
+                    road_state=item.road_state,
+                    user_id=item.agent_data.user_id,
+                    x=item.agent_data.accelerometer.x,
+                    y=item.agent_data.accelerometer.y,
+                    z=item.agent_data.accelerometer.z,
+                    latitude=item.agent_data.gps.latitude,
+                    longitude=item.agent_data.gps.longitude,
+                    timestamp=item.agent_data.timestamp,
+                )
+            )
+        conn.commit()
+    by_user: Dict[int, List[dict]] = {}
+    for row in inserted:
+        by_user.setdefault(row.user_id, []).append(row.model_dump(mode="json"))
+    for user_id, payload in by_user.items():
+        await send_data_to_subscribers(user_id, payload)
+    return {"status": "ok", "inserted": len(inserted)}
 
 
 @app.get(
