@@ -15,9 +15,13 @@ def process_agent_data(
     # Classify by accelerometer magnitude
     acc = agent_data.accelerometer
     magnitude = (acc.x**2 + acc.y**2 + acc.z**2) ** 0.5
-    if magnitude > 2.0:
+
+    baseline = 16500
+    deviation = abs(magnitude - baseline)
+
+    if deviation > 7000:
         road_state = "pothole"
-    elif magnitude > 1.2:
+    elif deviation > 2500:
         road_state = "bump"
     else:
         road_state = "normal"
