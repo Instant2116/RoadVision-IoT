@@ -1,7 +1,5 @@
-import asyncio
-import json
 from typing import Set, Dict, List, Any
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import (
     create_engine,
     MetaData,
@@ -11,9 +9,11 @@ from sqlalchemy import (
     String,
     Float,
     DateTime,
+    select,
+    insert,
+    update as sql_update,
+    delete as sql_delete,
 )
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql import select, insert
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from config import (
@@ -44,9 +44,6 @@ processed_agent_data = Table(
     Column("longitude", Float),
     Column("timestamp", DateTime),
 )
-SessionLocal = sessionmaker(bind=engine)
-
-
 # SQLAlchemy model
 class ProcessedAgentDataInDB(BaseModel):
     id: int
@@ -98,9 +95,21 @@ class ProcessedAgentData(BaseModel):
 
 # WebSocket subscriptions
 subscriptions: Dict[int, Set[WebSocket]] = {}
+public_subscriptions: Set[WebSocket] = set()
 
 
 # FastAPI WebSocket endpoint
+@app.websocket("/ws/")
+async def websocket_public_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    public_subscriptions.add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        public_subscriptions.discard(websocket)
+
+
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: int):
     await websocket.accept()
@@ -111,14 +120,43 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        subscriptions[user_id].remove(websocket)
+        subscriptions[user_id].discard(websocket)
 
 
 # Function to send data to subscribed users
 async def send_data_to_subscribers(user_id: int, data: Any):
     if user_id in subscriptions:
-        for websocket in subscriptions[user_id]:
+        for websocket in subscriptions[user_id].copy():
+            try:
+                await websocket.send_json(data)
+            except Exception:
+                subscriptions[user_id].discard(websocket)
+    for websocket in public_subscriptions.copy():
+        try:
             await websocket.send_json(data)
+        except Exception:
+            public_subscriptions.discard(websocket)
+
+
+def ensure_schema():
+    metadata.create_all(engine)
+
+
+def map_to_db_model(row_mapping) -> ProcessedAgentDataInDB:
+    return ProcessedAgentDataInDB(**dict(row_mapping))
+
+
+def payload_to_db_values(data: ProcessedAgentData) -> dict:
+    return {
+        "road_state": data.road_state,
+        "user_id": data.agent_data.user_id,
+        "x": data.agent_data.accelerometer.x,
+        "y": data.agent_data.accelerometer.y,
+        "z": data.agent_data.accelerometer.z,
+        "latitude": data.agent_data.gps.latitude,
+        "longitude": data.agent_data.gps.longitude,
+        "timestamp": data.agent_data.timestamp,
+    }
 
 
 # FastAPI CRUDL endpoints
@@ -128,39 +166,17 @@ async def send_data_to_subscribers(user_id: int, data: Any):
 async def create_processed_agent_data(data: List[ProcessedAgentData]):
     if not data:
         return {"status": "ok", "inserted": 0}
-    metadata.create_all(engine)
+    ensure_schema()
     inserted: List[ProcessedAgentDataInDB] = []
     with engine.connect() as conn:
         for item in data:
             stmt = (
                 insert(processed_agent_data)
-                .values(
-                    road_state=item.road_state,
-                    user_id=item.agent_data.user_id,
-                    x=item.agent_data.accelerometer.x,
-                    y=item.agent_data.accelerometer.y,
-                    z=item.agent_data.accelerometer.z,
-                    latitude=item.agent_data.gps.latitude,
-                    longitude=item.agent_data.gps.longitude,
-                    timestamp=item.agent_data.timestamp,
-                )
-                .returning(processed_agent_data.c.id)
+                .values(**payload_to_db_values(item))
+                .returning(*processed_agent_data.c)
             )
-            result = conn.execute(stmt)
-            row_id = result.scalar()
-            inserted.append(
-                ProcessedAgentDataInDB(
-                    id=row_id,
-                    road_state=item.road_state,
-                    user_id=item.agent_data.user_id,
-                    x=item.agent_data.accelerometer.x,
-                    y=item.agent_data.accelerometer.y,
-                    z=item.agent_data.accelerometer.z,
-                    latitude=item.agent_data.gps.latitude,
-                    longitude=item.agent_data.gps.longitude,
-                    timestamp=item.agent_data.timestamp,
-                )
-            )
+            row = conn.execute(stmt).mappings().one()
+            inserted.append(map_to_db_model(row))
         conn.commit()
     by_user: Dict[int, List[dict]] = {}
     for row in inserted:
@@ -175,14 +191,27 @@ async def create_processed_agent_data(data: List[ProcessedAgentData]):
     response_model=ProcessedAgentDataInDB,
 )
 def read_processed_agent_data(processed_agent_data_id: int):
-    # Get data by id
-    pass
+    ensure_schema()
+    with engine.connect() as conn:
+        stmt = select(processed_agent_data).where(
+            processed_agent_data.c.id == processed_agent_data_id
+        )
+        row = conn.execute(stmt).mappings().first()
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"ProcessedAgentData with id={processed_agent_data_id} not found",
+            )
+        return map_to_db_model(row)
 
 
 @app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
 def list_processed_agent_data():
-    # Get list of data
-    pass
+    ensure_schema()
+    with engine.connect() as conn:
+        stmt = select(processed_agent_data).order_by(processed_agent_data.c.id.asc())
+        rows = conn.execute(stmt).mappings().all()
+        return [map_to_db_model(row) for row in rows]
 
 
 @app.put(
@@ -190,8 +219,22 @@ def list_processed_agent_data():
     response_model=ProcessedAgentDataInDB,
 )
 def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAgentData):
-    # Update data
-    pass
+    ensure_schema()
+    with engine.connect() as conn:
+        stmt = (
+            sql_update(processed_agent_data)
+            .where(processed_agent_data.c.id == processed_agent_data_id)
+            .values(**payload_to_db_values(data))
+            .returning(*processed_agent_data.c)
+        )
+        row = conn.execute(stmt).mappings().first()
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"ProcessedAgentData with id={processed_agent_data_id} not found",
+            )
+        conn.commit()
+        return map_to_db_model(row)
 
 
 @app.delete(
@@ -199,8 +242,21 @@ def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAge
     response_model=ProcessedAgentDataInDB,
 )
 def delete_processed_agent_data(processed_agent_data_id: int):
-    # Delete by id
-    pass
+    ensure_schema()
+    with engine.connect() as conn:
+        stmt = (
+            sql_delete(processed_agent_data)
+            .where(processed_agent_data.c.id == processed_agent_data_id)
+            .returning(*processed_agent_data.c)
+        )
+        row = conn.execute(stmt).mappings().first()
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"ProcessedAgentData with id={processed_agent_data_id} not found",
+            )
+        conn.commit()
+        return map_to_db_model(row)
 
 
 if __name__ == "__main__":
