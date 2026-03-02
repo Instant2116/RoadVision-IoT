@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Float,
     DateTime,
+    insert,
 )
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import select
@@ -45,9 +46,11 @@ processed_agent_data = Table(
     Column("timestamp", DateTime),
 )
 SessionLocal = sessionmaker(bind=engine)
-
+metadata.create_all(engine)
 
 # SQLAlchemy model
+
+
 class ProcessedAgentDataInDB(BaseModel):
     id: int
     road_state: str
@@ -118,7 +121,8 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
 async def send_data_to_subscribers(user_id: int, data):
     if user_id in subscriptions:
         for websocket in subscriptions[user_id]:
-            await websocket.send_json(json.dumps(data))
+            # await websocket.send_json(json.dumps(data))
+            await websocket.send_json(data)
 
 
 # FastAPI CRUDL endpoints
@@ -128,22 +132,63 @@ async def send_data_to_subscribers(user_id: int, data):
 async def create_processed_agent_data(data: List[ProcessedAgentData]):
     # Insert data to database
     # Send data to subscribers
-    pass
+    sent = 0
+    db = SessionLocal()
+    try:
+        for item in data:
+            row = {
+                "road_state": item.road_state,
+                "user_id": item.agent_data.user_id,
+                "x": item.agent_data.accelerometer.x,
+                "y": item.agent_data.accelerometer.y,
+                "z": item.agent_data.accelerometer.z,
+                "latitude": item.agent_data.gps.latitude,
+                "longitude": item.agent_data.gps.longitude,
+                "timestamp": item.agent_data.timestamp,
+            }
+            db.execute(insert(processed_agent_data).values(**row))
+
+            # websocket (можно оставить)
+            await send_data_to_subscribers(item.agent_data.user_id, {
+                "road_state": row["road_state"],
+                "user_id": row["user_id"],
+                "x": row["x"], "y": row["y"], "z": row["z"],
+                "latitude": row["latitude"], "longitude": row["longitude"],
+                "timestamp": row["timestamp"].isoformat(),
+            })
+            sent += 1
+
+        db.commit()
+    finally:
+        db.close()
+
+    return {"sent": sent}
 
 
-@app.get(
-    "/processed_agent_data/{processed_agent_data_id}",
-    response_model=ProcessedAgentDataInDB,
-)
+# @app.get(
+#     "/processed_agent_data/{processed_agent_data_id}",
+#     response_model=ProcessedAgentDataInDB,
+# )
+@app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
+def list_processed_agent_data():
+    db = SessionLocal()
+    try:
+        rows = db.execute(select(processed_agent_data)).mappings().all()
+        # rows = list[RowMapping], превращаем в обычные dict
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
 def read_processed_agent_data(processed_agent_data_id: int):
     # Get data by id
     pass
 
 
-@app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
-def list_processed_agent_data():
-    # Get list of data
-    pass
+# @app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
+# def list_processed_agent_data():
+#     # Get list of data
+#     pass
 
 
 @app.put(
