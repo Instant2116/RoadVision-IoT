@@ -1,10 +1,8 @@
 name: "road_vision__database"
 services:
   postgres_db:
-    build:
-      context: ./db
-      dockerfile: Dockerfile
-    image: road_vision__database-postgres:16
+    # image: postgres:latest
+    image: postgres:16
     container_name: postgres_db
     restart: always
     environment:
