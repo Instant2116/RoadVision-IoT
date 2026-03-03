@@ -1,3 +1,4 @@
+import json
 import logging
 import paho.mqtt.client as mqtt
 from app.interfaces.agent_gateway import AgentGateway
@@ -32,16 +33,16 @@ class AgentMQTTAdapter(AgentGateway):
             logging.info(f"Failed to connect to MQTT broker with code: {rc}")
 
     def on_message(self, client, userdata, msg):
-        """Processing agent data and sent it to hub gateway"""
+        """Processing agent data and send it to hub gateway. Handles both single object and array payloads (agent publishes arrays)."""
         try:
             payload: str = msg.payload.decode("utf-8")
-            # Create AgentData instance with the received data
-            agent_data = AgentData.model_validate_json(payload, strict=True)
-            # Process the received data (you can call a use case here if needed)
-            processed_data = process_agent_data(agent_data)
-            # Store the agent_data in the database (you can send it to the data processing module)
-            if not self.hub_gateway.save_data(processed_data):
-                logging.error("Hub is not available")
+            parsed = json.loads(payload)
+            items = parsed if isinstance(parsed, list) else [parsed]
+            for item in items:
+                agent_data = AgentData.model_validate(item)
+                processed_data = process_agent_data(agent_data)
+                if not self.hub_gateway.save_data(processed_data):
+                    logging.error("Hub is not available")
         except Exception as e:
             logging.info(f"Error processing MQTT message: {e}")
 
