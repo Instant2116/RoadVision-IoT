@@ -5,28 +5,34 @@ from domain.parking import Parking
 from domain.accelerometer import Accelerometer
 from domain.gps import Gps
 from domain.aggregated_data import AggregatedData
+from domain.bus_occupancy import BusOccupancy
+
 
 class FileDatasource:
-    def __init__(self, accelerometer_filename: str, gps_filename: str, parking_filename: str, user_id: int) -> None:
+    def __init__(self, accelerometer_filename: str, gps_filename: str, parking_filename: str, bus_filename: str, user_id: int) -> None:
         self.acc_filename = accelerometer_filename
         self.gps_filename = gps_filename
         self.parking_filename = parking_filename
+        self.bus_filename = bus_filename
         self.user_id = user_id
         self.acc_file = None
         self.gps_file = None
         self.parking_file = None
+        self.bus_file = None
         self.acc_reader = None
         self.gps_reader = None
         self.parking_reader = None
+        self.bus_reader = None
         # Headers csv must have
         self._required_acc = {'x', 'y', 'z'}
         self._required_gps = {'longitude', 'latitude'}
         self._required_parking = {'empty_count', 'longitude', 'latitude'}
+        self._required_bus = {'bus_id', 'longitude', 'latitude', 'occupancy_rate'}
 
     def _verify_headers(self, reader, required_fields, filename):
         if not reader.fieldnames:
             raise ValueError(f"File {filename} is empty or missing a header row.")
-        
+
         missing = required_fields - set(reader.fieldnames)
         if missing:
             raise ValueError(f"File {filename} is missing required columns: {missing}")
@@ -45,6 +51,10 @@ class FileDatasource:
         self.parking_reader = csv.DictReader(self.parking_file)
         self._verify_headers(self.parking_reader, self._required_parking, self.parking_filename)
 
+        self.bus_file = open(self.bus_filename, 'r')
+        self.bus_reader = csv.DictReader(self.bus_file)
+        self._verify_headers(self.bus_reader, self._required_bus, self.bus_filename)
+
     def __cycling_next(self, reader_attr_name, file):
         reader = getattr(self, reader_attr_name)
         try:
@@ -52,7 +62,6 @@ class FileDatasource:
         except StopIteration:
             file.seek(0)
             reader = csv.DictReader(file)
-            next(reader) # Skip header row on re-read
             res = next(reader)
             setattr(self, reader_attr_name, reader)
         return res
@@ -70,16 +79,31 @@ class FileDatasource:
     def _read_single_park(self) -> Parking:
         parking_row = self.__cycling_next('parking_reader', self.parking_file)
         return Parking(
-            int(parking_row["empty_count"]),
-            Gps(float(parking_row['longitude']), float(parking_row['latitude'])))
+            int(parking_row['empty_count']),
+            Gps(float(parking_row['longitude']), float(parking_row['latitude']))
+        )
 
-    def read(self) -> tuple[list[AggregatedData],list[Parking]]:
+    def _read_single_bus(self) -> BusOccupancy:
+        bus_row = self.__cycling_next('bus_reader', self.bus_file)
+        return BusOccupancy(
+            str(bus_row['bus_id']),
+            float(bus_row['occupancy_rate']),
+            Gps(float(bus_row['longitude']), float(bus_row['latitude']))
+        )
+
+    def read(self) -> tuple[list[AggregatedData], list[Parking], list[BusOccupancy]]:
         return (
             [self._read_single_agg() for _ in range(randint(5, 7))],
-            [self._read_single_park() for _ in range(randint(5, 7))]
-            )
+            [self._read_single_park() for _ in range(randint(5, 7))],
+            [self._read_single_bus() for _ in range(randint(5, 7))]
+        )
 
     def stopReading(self):
-        if self.acc_file: self.acc_file.close()
-        if self.gps_file: self.gps_file.close()
-        if self.parking_file: self.parking_file.close()
+        if self.acc_file:
+            self.acc_file.close()
+        if self.gps_file:
+            self.gps_file.close()
+        if self.parking_file:
+            self.parking_file.close()
+        if self.bus_file:
+            self.bus_file.close()
