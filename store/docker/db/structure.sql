@@ -9,3 +9,12 @@ CREATE TABLE processed_agent_data (
     longitude FLOAT,
     timestamp TIMESTAMP
 );
+
+CREATE TABLE bus_occupancy_data (
+    id SERIAL PRIMARY KEY,
+    bus_id INTEGER NOT NULL,
+    occupancy_rate FLOAT NOT NULL,
+    latitude FLOAT NOT NULL,
+    longitude FLOAT NOT NULL,
+    timestamp TIMESTAMP NOT NULL
+);
