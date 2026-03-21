@@ -10,7 +10,9 @@ from sqlalchemy import (
     Float,
     DateTime,
     insert,
+    select,
 )
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from config import (
@@ -40,6 +42,16 @@ processed_agent_data = Table(
     Column("latitude", Float),
     Column("longitude", Float),
     Column("timestamp", DateTime),
+)
+bus_occupancy_data = Table(
+    "bus_occupancy_data",
+    metadata,
+    Column("id", Integer, primary_key=True, index=True),
+    Column("bus_id", Integer, nullable=False),
+    Column("occupancy_rate", Float, nullable=False),
+    Column("latitude", Float, nullable=False),
+    Column("longitude", Float, nullable=False),
+    Column("timestamp", DateTime, nullable=False),
 )
 SessionLocal = sessionmaker(bind=engine)
 metadata.create_all(engine)
@@ -95,6 +107,19 @@ class ProcessedAgentData(BaseModel):
     agent_data: AgentData
 
 
+class BusOccupancyData(BaseModel):
+    bus_id: int
+    occupancy_rate: float
+    gps: GpsData
+    timestamp: datetime
+
+
+class IngestedData(BaseModel):
+    road_state: str
+    agent_data: AgentData | None = None
+    bus_occupancy_data: BusOccupancyData | None = None
+
+
 # WebSocket subscriptions
 subscriptions: Dict[int, Set[WebSocket]] = {}
 public_subscriptions: Set[WebSocket] = set()
@@ -137,13 +162,26 @@ async def send_data_to_subscribers(user_id: int, data: Any):
 
 
 @app.post("/processed_agent_data/")
-async def create_processed_agent_data(data: List[ProcessedAgentData]):
+async def create_processed_agent_data(data: List[IngestedData]):
     # Insert data to database
     # Send data to subscribers
     sent = 0
     db = SessionLocal()
     try:
         for item in data:
+            if item.bus_occupancy_data is not None:
+                db.execute(
+                    insert(bus_occupancy_data).values(
+                        bus_id=item.bus_occupancy_data.bus_id,
+                        occupancy_rate=item.bus_occupancy_data.occupancy_rate,
+                        latitude=item.bus_occupancy_data.gps.latitude,
+                        longitude=item.bus_occupancy_data.gps.longitude,
+                        timestamp=item.bus_occupancy_data.timestamp,
+                    )
+                )
+                continue
+            if item.agent_data is None:
+                continue
             row = {
                 "road_state": item.road_state,
                 "user_id": item.agent_data.user_id,

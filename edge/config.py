@@ -12,6 +12,7 @@ def try_parse_int(value: str):
 MQTT_BROKER_HOST = os.environ.get("MQTT_BROKER_HOST") or "localhost"
 MQTT_BROKER_PORT = try_parse_int(os.environ.get("MQTT_BROKER_PORT")) or 1883
 MQTT_TOPIC = os.environ.get("MQTT_TOPIC") or "agent_data_topic"
+MQTT_TOPIC_BUS = os.environ.get("MQTT_TOPIC_BUS") or "agent_data_topic/bus"
 
 # Configuration for hub MQTT
 HUB_MQTT_BROKER_HOST = os.environ.get("HUB_MQTT_BROKER_HOST") or "localhost"

@@ -24,6 +24,7 @@ services:
       MQTT_BROKER_HOST: "mqtt"
       MQTT_BROKER_PORT: 1883
       MQTT_TOPIC: "agent_data_topic/aggregated"
+      MQTT_TOPIC_BUS: "agent_data_topic/bus"
       HUB_HOST: "store"
       HUB_PORT: 8000
       HUB_MQTT_BROKER_HOST: "mqtt"

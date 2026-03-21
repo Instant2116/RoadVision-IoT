@@ -6,6 +6,7 @@ from config import (
     MQTT_BROKER_HOST,
     MQTT_BROKER_PORT,
     MQTT_TOPIC,
+    MQTT_TOPIC_BUS,
     HUB_URL,
     HUB_MQTT_BROKER_HOST,
     HUB_MQTT_BROKER_PORT,
@@ -36,6 +37,7 @@ if __name__ == "__main__":
         broker_host=MQTT_BROKER_HOST,
         broker_port=MQTT_BROKER_PORT,
         topic=MQTT_TOPIC,
+        bus_topic=MQTT_TOPIC_BUS,
         hub_gateway=hub_adapter,
     )
     try:
