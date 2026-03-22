@@ -10,6 +10,19 @@ def process_agent_data(
     Parameters:
         agent_data (AgentData): Agent data that containing accelerometer, GPS, and timestamp.
     Returns:
-        processed_data_batch (ProcessedAgentData): Processed data containing the classified state of the road surface and agent data.
+        ProcessedAgentData: Processed data containing the classified state of the road surface and agent data.
     """
-    # Implement it
+    # Classify by accelerometer magnitude
+    acc = agent_data.accelerometer
+    magnitude = (acc.x**2 + acc.y**2 + acc.z**2) ** 0.5
+
+    baseline = 16500
+    deviation = abs(magnitude - baseline)
+
+    if deviation > 7000:
+        road_state = "pothole"
+    elif deviation > 2500:
+        road_state = "bump"
+    else:
+        road_state = "normal"
+    return ProcessedAgentData(road_state=road_state, agent_data=agent_data)
