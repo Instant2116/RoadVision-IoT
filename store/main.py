@@ -1,6 +1,7 @@
 from typing import Set, Dict, List, Any
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import (
+    and_,
     create_engine,
     MetaData,
     Table,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     String,
     Float,
     DateTime,
+    func,
     insert,
     select,
 )
@@ -158,6 +160,17 @@ async def send_data_to_subscribers(user_id: int, data: Any):
             await websocket.send_json(data)
 
 
+def _build_timestamp_filters(
+    from_ts: datetime | None, to_ts: datetime | None, timestamp_column
+):
+    filters = []
+    if from_ts is not None:
+        filters.append(timestamp_column >= from_ts)
+    if to_ts is not None:
+        filters.append(timestamp_column <= to_ts)
+    return filters
+
+
 # FastAPI CRUDL endpoints
 
 
@@ -222,6 +235,79 @@ def list_processed_agent_data():
         rows = db.execute(select(processed_agent_data)).mappings().all()
         # rows = list[RowMapping], превращаем в обычные dict
         return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/analytics/road_state_summary")
+def road_state_summary(
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
+):
+    if from_ts is not None and to_ts is not None and from_ts > to_ts:
+        raise HTTPException(status_code=400, detail="'from' must be <= 'to'")
+
+    db = SessionLocal()
+    try:
+        stmt = select(
+            processed_agent_data.c.road_state,
+            func.count(processed_agent_data.c.id).label("events_count"),
+        )
+        filters = _build_timestamp_filters(
+            from_ts, to_ts, processed_agent_data.c.timestamp
+        )
+        if filters:
+            stmt = stmt.where(and_(*filters))
+
+        stmt = stmt.group_by(processed_agent_data.c.road_state).order_by(
+            func.count(processed_agent_data.c.id).desc()
+        )
+        rows = db.execute(stmt).mappings().all()
+        return [
+            {"road_state": row["road_state"], "events_count": int(row["events_count"])}
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/analytics/bus_occupancy_summary")
+def bus_occupancy_summary(
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
+):
+    if from_ts is not None and to_ts is not None and from_ts > to_ts:
+        raise HTTPException(status_code=400, detail="'from' must be <= 'to'")
+
+    db = SessionLocal()
+    try:
+        stmt = select(
+            func.count(bus_occupancy_data.c.id).label("records_count"),
+            func.avg(bus_occupancy_data.c.occupancy_rate).label("avg_occupancy_rate"),
+            func.min(bus_occupancy_data.c.occupancy_rate).label("min_occupancy_rate"),
+            func.max(bus_occupancy_data.c.occupancy_rate).label("max_occupancy_rate"),
+        )
+        filters = _build_timestamp_filters(
+            from_ts, to_ts, bus_occupancy_data.c.timestamp
+        )
+        if filters:
+            stmt = stmt.where(and_(*filters))
+
+        row = db.execute(stmt).mappings().one()
+        records_count = int(row["records_count"] or 0)
+        if records_count == 0:
+            return {
+                "records_count": 0,
+                "avg_occupancy_rate": None,
+                "min_occupancy_rate": None,
+                "max_occupancy_rate": None,
+            }
+        return {
+            "records_count": records_count,
+            "avg_occupancy_rate": float(row["avg_occupancy_rate"]),
+            "min_occupancy_rate": float(row["min_occupancy_rate"]),
+            "max_occupancy_rate": float(row["max_occupancy_rate"]),
+        }
     finally:
         db.close()
 

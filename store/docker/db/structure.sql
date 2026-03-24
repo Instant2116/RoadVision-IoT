@@ -10,6 +10,15 @@ CREATE TABLE processed_agent_data (
     timestamp TIMESTAMP
 );
 
+CREATE INDEX idx_processed_agent_data_timestamp
+    ON processed_agent_data (timestamp);
+
+CREATE INDEX idx_processed_agent_data_user_id
+    ON processed_agent_data (user_id);
+
+CREATE INDEX idx_processed_agent_data_road_state
+    ON processed_agent_data (road_state);
+
 CREATE TABLE bus_occupancy_data (
     id SERIAL PRIMARY KEY,
     bus_id INTEGER NOT NULL,
