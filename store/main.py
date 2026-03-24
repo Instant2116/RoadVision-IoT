@@ -179,6 +179,18 @@ async def create_processed_agent_data(data: List[IngestedData]):
                         timestamp=item.bus_occupancy_data.timestamp,
                     )
                 )
+                await send_data_to_subscribers(1, {
+                    "bus_occupancy_data": {
+                        "bus_id": item.bus_occupancy_data.bus_id,
+                        "occupancy_rate": item.bus_occupancy_data.occupancy_rate,
+                        "gps": {
+                            "latitude": item.bus_occupancy_data.gps.latitude,
+                            "longitude": item.bus_occupancy_data.gps.longitude
+                        },
+                        "timestamp": item.bus_occupancy_data.timestamp.isoformat()
+                    }
+                })
+
                 continue
             if item.agent_data is None:
                 continue

@@ -1,5 +1,3 @@
-# datasource.py
-import asyncio
 import json
 import queue
 import threading
@@ -12,21 +10,17 @@ import websockets
 from config import STORE_HOST, STORE_PORT
 
 
-Point = Tuple[float, float, str]  # lat, lon, road_state
+Point = Tuple[float, float, str]  # lat, lon, type/state
 
 
 class Datasource:
     def __init__(self, user_id: int):
         self.user_id = user_id
         self.connection_status: Optional[str] = None
-
-        # очередь точек между потоками
         self._q: "queue.Queue[Point]" = queue.Queue()
 
-        # 1) подтянуть историю из Store (чтобы маркеры появились сразу)
         self._preload_points()
 
-        # 2) websocket слушаем в отдельном потоке со своим asyncio loop
         t = threading.Thread(target=self._ws_thread, daemon=True)
         t.start()
 
@@ -39,7 +33,6 @@ class Datasource:
                 break
         return points
 
-    # ---------- HTTP preload ----------
     def _preload_points(self):
         url = f"http://{STORE_HOST}:{STORE_PORT}/processed_agent_data/"
         try:
@@ -49,25 +42,13 @@ class Datasource:
 
             added = 0
             for row in rows:
-                if int(row.get("user_id", -1)) != int(self.user_id):
-                    continue
-
-                lat = row.get("latitude")
-                lon = row.get("longitude")
-                state = row.get("road_state", "normal")
-
-                if lat is None or lon is None:
-                    continue
-
-                self._q.put((float(lat), float(lon), str(state)))
-                added += 1
+                added += self._extract_points(row)
 
             print(
                 f"[Datasource] preload rows={len(rows)} queued={added} from {url}")
         except Exception as e:
             print(f"[Datasource] preload error from {url}: {e}")
 
-    # ---------- WebSocket ----------
     def _ws_thread(self):
         import asyncio
         asyncio.run(self._ws_loop())
@@ -82,16 +63,15 @@ class Datasource:
                     self.connection_status = "Connected"
                     print("[Datasource] WS connected")
 
-                    # сервер ждёт receive_text() в цикле, поэтому иногда отправляем текст
                     async def keepalive():
                         while True:
                             try:
                                 await ws.send("ping")
                             except Exception:
                                 return
-                            await asyncio.sleep(10)
+                            await __import__("asyncio").sleep(10)
 
-                    ka_task = asyncio.create_task(keepalive())
+                    ka_task = __import__("asyncio").create_task(keepalive())
 
                     try:
                         async for message in ws:
@@ -105,27 +85,70 @@ class Datasource:
                 time.sleep(2)
 
     def _handle_message(self, message: str):
-        """
-        Store шлёт send_json(dict), значит здесь приходит JSON-строка объекта:
-        {"road_state": "...", "latitude": ..., "longitude": ..., "user_id": ...}
-        """
         try:
             data = json.loads(message)
         except Exception:
             return
 
-        # иногда удобно поддержать и формат "список"
         items = data if isinstance(data, list) else [data]
 
         for obj in items:
             try:
-                if int(obj.get("user_id", -1)) != int(self.user_id):
-                    continue
-                lat = obj.get("latitude")
-                lon = obj.get("longitude")
-                state = obj.get("road_state", "normal")
-                if lat is None or lon is None:
-                    continue
-                self._q.put((float(lat), float(lon), str(state)))
+                self._extract_points(obj)
             except Exception:
                 continue
+
+    def _extract_points(self, obj) -> int:
+        added = 0
+
+        if "latitude" in obj and "longitude" in obj:
+            try:
+                if int(obj.get("user_id", -1)) == int(self.user_id):
+                    lat = obj.get("latitude")
+                    lon = obj.get("longitude")
+                    state = obj.get("road_state", "normal")
+
+                    if lat is not None and lon is not None:
+                        self._q.put((float(lat), float(lon), str(state)))
+                        added += 1
+            except Exception:
+                pass
+
+        # new road event
+        agent = obj.get("agent_data")
+        if agent and agent.get("gps"):
+            try:
+                if int(agent.get("user_id", -1)) == int(self.user_id):
+                    gps = agent["gps"]
+                    lat = gps.get("latitude")
+                    lon = gps.get("longitude")
+                    state = obj.get("road_state", "normal")
+
+                    if lat is not None and lon is not None:
+                        self._q.put((float(lat), float(lon), str(state)))
+                        added += 1
+            except Exception:
+                pass
+
+        # new bus event
+        bus = obj.get("bus_occupancy_data")
+        if bus and bus.get("gps"):
+            try:
+                gps = bus["gps"]
+                lat = gps.get("latitude")
+                lon = gps.get("longitude")
+
+                if lat is not None and lon is not None:
+                    rate = bus.get("occupancy_rate", 0)
+                    if rate < 0.33:
+                        state = "bus_low"
+                    elif rate < 0.66:
+                        state = "bus_medium"
+                    else:
+                        state = "bus_high"
+                    self._q.put((float(lat), float(lon), str(state)))
+                    added += 1
+            except Exception:
+                pass
+
+        return added
