@@ -26,7 +26,12 @@ from config import (
 )
 
 # FastAPI app setup
-app = FastAPI()
+app = FastAPI(
+    title="Road & Bus Monitoring API",
+    description="API for ingesting agent accelerometer data and bus occupancy metrics.",
+    version="1.0.0",
+)
+
 # SQLAlchemy setup
 DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 engine = create_engine(DATABASE_URL)
@@ -174,7 +179,11 @@ def _build_timestamp_filters(
 # FastAPI CRUDL endpoints
 
 
-@app.post("/processed_agent_data/")
+@app.post(
+    "/processed_agent_data/",
+    tags=["Data Ingestion"],
+    summary="Ingest agent and bus data",
+)
 async def create_processed_agent_data(data: List[IngestedData]):
     # Insert data to database
     # Send data to subscribers
@@ -208,13 +217,19 @@ async def create_processed_agent_data(data: List[IngestedData]):
             db.execute(insert(processed_agent_data).values(**row))
 
             # websocket (можно оставить)
-            await send_data_to_subscribers(item.agent_data.user_id, {
-                "road_state": row["road_state"],
-                "user_id": row["user_id"],
-                "x": row["x"], "y": row["y"], "z": row["z"],
-                "latitude": row["latitude"], "longitude": row["longitude"],
-                "timestamp": row["timestamp"].isoformat(),
-            })
+            await send_data_to_subscribers(
+                item.agent_data.user_id,
+                {
+                    "road_state": row["road_state"],
+                    "user_id": row["user_id"],
+                    "x": row["x"],
+                    "y": row["y"],
+                    "z": row["z"],
+                    "latitude": row["latitude"],
+                    "longitude": row["longitude"],
+                    "timestamp": row["timestamp"].isoformat(),
+                },
+            )
             sent += 1
 
         db.commit()
@@ -228,7 +243,11 @@ async def create_processed_agent_data(data: List[IngestedData]):
 #     "/processed_agent_data/{processed_agent_data_id}",
 #     response_model=ProcessedAgentDataInDB,
 # )
-@app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
+@app.get(
+    "/processed_agent_data/",
+    response_model=list[ProcessedAgentDataInDB],
+    tags=["Analytics"],
+)
 def list_processed_agent_data():
     db = SessionLocal()
     try:
@@ -239,7 +258,11 @@ def list_processed_agent_data():
         db.close()
 
 
-@app.get("/analytics/road_state_summary")
+@app.get(
+    "/analytics/road_state_summary",
+    tags=["Analytics"],
+    summary="Get summary of road states",
+)
 def road_state_summary(
     from_ts: datetime | None = Query(default=None, alias="from"),
     to_ts: datetime | None = Query(default=None, alias="to"),
@@ -271,7 +294,11 @@ def road_state_summary(
         db.close()
 
 
-@app.get("/analytics/bus_occupancy_summary")
+@app.get(
+    "/analytics/bus_occupancy_summary",
+    tags=["Analytics"],
+    summary="Get summary of bus occupancy metrics",
+)
 def bus_occupancy_summary(
     from_ts: datetime | None = Query(default=None, alias="from"),
     to_ts: datetime | None = Query(default=None, alias="to"),
@@ -336,6 +363,7 @@ def read_processed_agent_data(processed_agent_data_id: int):
 @app.put(
     "/processed_agent_data/{processed_agent_data_id}",
     response_model=ProcessedAgentDataInDB,
+    tags=["Analytics"],
 )
 def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAgentData):
     ensure_schema()
@@ -359,6 +387,7 @@ def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAge
 @app.delete(
     "/processed_agent_data/{processed_agent_data_id}",
     response_model=ProcessedAgentDataInDB,
+    tags=["Analytics"],
 )
 def delete_processed_agent_data(processed_agent_data_id: int):
     ensure_schema()
